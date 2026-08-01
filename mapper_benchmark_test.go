@@ -106,6 +106,6 @@ func BenchmarkXLSXImport_20k(b *testing.B) {
 		if err != nil {
 			b.Fatalf("import failed: %v", err)
 		}
-		importer.Close()
+		_ = importer.Close()
 	}
 }

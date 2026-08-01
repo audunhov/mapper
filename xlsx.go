@@ -89,7 +89,9 @@ func (xi *XLSXImporter) parse() error {
 		xi.err = fmt.Errorf("failed to get rows for sheet %q: %w", sheetName, err)
 		return xi.err
 	}
-	defer rowsIter.Close()
+	defer func() {
+		_ = rowsIter.Close()
+	}()
 
 	var headers []string
 	if rowsIter.Next() {
