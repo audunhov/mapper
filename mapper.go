@@ -114,29 +114,43 @@ type fieldConfig struct {
 
 func getFieldConfigs(structType reflect.Type) map[string]fieldConfig {
 	configs := make(map[string]fieldConfig)
-	for i := 0; i < structType.NumField(); i++ {
-		field := structType.Field(i)
-		if field.PkgPath != "" {
-			continue
-		}
-		tag := field.Tag.Get("map")
-		if tag == "-" || tag == "" {
-			continue
-		}
-		parts := strings.Split(tag, ",")
-		var layout string
-		for _, opt := range parts[1:] {
-			opt = strings.TrimSpace(opt)
-			if strings.HasPrefix(opt, "layout:") {
-				layout = strings.TrimPrefix(opt, "layout:")
-			} else if strings.HasPrefix(opt, "layout=") {
-				layout = strings.TrimPrefix(opt, "layout=")
+	var collectConfigs func(t reflect.Type)
+	collectConfigs = func(t reflect.Type) {
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			if field.PkgPath != "" {
+				continue
+			}
+			if field.Anonymous {
+				fieldType := field.Type
+				if fieldType.Kind() == reflect.Ptr {
+					fieldType = fieldType.Elem()
+				}
+				if fieldType.Kind() == reflect.Struct {
+					collectConfigs(fieldType)
+				}
+				continue
+			}
+			tag := field.Tag.Get("map")
+			if tag == "-" || tag == "" {
+				continue
+			}
+			parts := strings.Split(tag, ",")
+			var layout string
+			for _, opt := range parts[1:] {
+				opt = strings.TrimSpace(opt)
+				if strings.HasPrefix(opt, "layout:") {
+					layout = strings.TrimPrefix(opt, "layout:")
+				} else if strings.HasPrefix(opt, "layout=") {
+					layout = strings.TrimPrefix(opt, "layout=")
+				}
+			}
+			if layout != "" {
+				configs[field.Name] = fieldConfig{layout: layout}
 			}
 		}
-		if layout != "" {
-			configs[field.Name] = fieldConfig{layout: layout}
-		}
 	}
+	collectConfigs(structType)
 	return configs
 }
 
@@ -162,29 +176,44 @@ func resolveMapping(sourceKeys []string, structType reflect.Type, mapping Import
 	exactFields := make(map[string]string)
 	normalizedFields := make(map[string]string)
 
-	for i := 0; i < structType.NumField(); i++ {
-		field := structType.Field(i)
-		if field.PkgPath != "" { // unexported
-			continue
-		}
+	var collectFields func(t reflect.Type)
+	collectFields = func(t reflect.Type) {
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			if field.PkgPath != "" { // unexported
+				continue
+			}
 
-		tag := field.Tag.Get("map")
-		if tag == "-" {
-			continue
-		}
+			if field.Anonymous {
+				fieldType := field.Type
+				if fieldType.Kind() == reflect.Ptr {
+					fieldType = fieldType.Elem()
+				}
+				if fieldType.Kind() == reflect.Struct {
+					collectFields(fieldType)
+				}
+				continue
+			}
 
-		var headerName string
-		if tag != "" {
-			parts := strings.Split(tag, ",")
-			headerName = strings.TrimSpace(parts[0])
-		}
+			tag := field.Tag.Get("map")
+			if tag == "-" {
+				continue
+			}
 
-		if headerName != "" {
-			taggedFields[headerName] = field.Name
+			var headerName string
+			if tag != "" {
+				parts := strings.Split(tag, ",")
+				headerName = strings.TrimSpace(parts[0])
+			}
+
+			if headerName != "" {
+				taggedFields[headerName] = field.Name
+			}
+			exactFields[field.Name] = field.Name
+			normalizedFields[normalizeKey(field.Name)] = field.Name
 		}
-		exactFields[field.Name] = field.Name
-		normalizedFields[normalizeKey(field.Name)] = field.Name
 	}
+	collectFields(structType)
 
 	// If a mapping is explicitly provided, we start with it
 	if len(mapping) > 0 {
@@ -219,7 +248,29 @@ func resolveMapping(sourceKeys []string, structType reflect.Type, mapping Import
 	return resolved
 }
 
+func initializeEmbedded(val reflect.Value) {
+	t := val.Type()
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if field.Anonymous {
+			fieldVal := val.Field(i)
+			if fieldVal.Kind() == reflect.Ptr {
+				if fieldVal.IsNil() {
+					fieldVal.Set(reflect.New(fieldVal.Type().Elem()))
+				}
+				initializeEmbedded(fieldVal.Elem())
+			} else {
+				initializeEmbedded(fieldVal)
+			}
+		}
+	}
+}
+
 func mapRowToStruct(row map[string]string, val reflect.Value, mapping ImportMap, configs map[string]fieldConfig) error {
+	initializeEmbedded(val)
 	for srcKey, destField := range mapping {
 		field := val.FieldByName(destField)
 		if !field.IsValid() {

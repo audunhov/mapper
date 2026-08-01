@@ -392,3 +392,68 @@ Bob,,,,`
 		t.Errorf("expected Status to be nil, got %v", *bob.Status)
 	}
 }
+
+type EmbeddedBase struct {
+	ID string `map:"id"`
+}
+
+type EmbeddedDetails struct {
+	Role string // auto-mapped from "Role"
+}
+
+type EmbeddedUser struct {
+	EmbeddedBase              // Value-type anonymous struct
+	*EmbeddedDetails          // Pointer-type anonymous struct
+	Name             string   `map:"name"`
+}
+
+func TestEmbeddedStructs(t *testing.T) {
+	csvData := `id,name,Role
+usr-123,Alice,Admin
+usr-456,Bob,Editor`
+
+	importer := NewCSVImporter(strings.NewReader(csvData))
+	imported, err := importer.Import()
+	if err != nil {
+		t.Fatalf("failed to import CSV: %v", err)
+	}
+
+	users, err := Convert[EmbeddedUser](imported, nil)
+	if err != nil {
+		t.Fatalf("failed to convert: %v", err)
+	}
+
+	if len(users) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(users))
+	}
+
+	// Verify usr-123 (Alice)
+	alice := users[0]
+	if alice.ID != "usr-123" {
+		t.Errorf("expected ID usr-123, got %s", alice.ID)
+	}
+	if alice.Name != "Alice" {
+		t.Errorf("expected Name Alice, got %s", alice.Name)
+	}
+	if alice.EmbeddedDetails == nil {
+		t.Fatal("expected EmbeddedDetails to be initialized, got nil")
+	}
+	if alice.Role != "Admin" {
+		t.Errorf("expected Role Admin, got %s", alice.Role)
+	}
+
+	// Verify usr-456 (Bob)
+	bob := users[1]
+	if bob.ID != "usr-456" {
+		t.Errorf("expected ID usr-456, got %s", bob.ID)
+	}
+	if bob.Name != "Bob" {
+		t.Errorf("expected Name Bob, got %s", bob.Name)
+	}
+	if bob.EmbeddedDetails == nil {
+		t.Fatal("expected EmbeddedDetails to be initialized, got nil")
+	}
+	if bob.Role != "Editor" {
+		t.Errorf("expected Role Editor, got %s", bob.Role)
+	}
+}
