@@ -10,6 +10,7 @@ import (
 type XLSXImporter struct {
 	reader   io.Reader
 	sheet    string
+	file     *excelize.File
 	imported *Imported
 	err      error
 }
@@ -21,17 +22,56 @@ func NewXLSXImporter(reader io.Reader, sheet string) *XLSXImporter {
 	}
 }
 
+func (xi *XLSXImporter) getFile() (*excelize.File, error) {
+	if xi.file != nil {
+		return xi.file, nil
+	}
+	if xi.err != nil {
+		return nil, xi.err
+	}
+	f, err := excelize.OpenReader(xi.reader)
+	if err != nil {
+		xi.err = fmt.Errorf("failed to parse xlsx: %w", err)
+		return nil, xi.err
+	}
+	xi.file = f
+	return f, nil
+}
+
+// GetSheets returns a list of sheet names in the XLSX file.
+func (xi *XLSXImporter) GetSheets() ([]string, error) {
+	f, err := xi.getFile()
+	if err != nil {
+		return nil, err
+	}
+	return f.GetSheetList(), nil
+}
+
+// SetSheet changes the target sheet to be imported and clears any cached import data.
+func (xi *XLSXImporter) SetSheet(sheet string) {
+	xi.sheet = sheet
+	xi.imported = nil
+}
+
+// Close closes the underlying excelize File if it was opened.
+func (xi *XLSXImporter) Close() error {
+	if xi.file != nil {
+		err := xi.file.Close()
+		xi.file = nil
+		return err
+	}
+	return nil
+}
+
 func (xi *XLSXImporter) parse() error {
 	if xi.imported != nil || xi.err != nil {
 		return xi.err
 	}
 
-	f, err := excelize.OpenReader(xi.reader)
+	f, err := xi.getFile()
 	if err != nil {
-		xi.err = fmt.Errorf("failed to parse xlsx: %w", err)
-		return xi.err
+		return err
 	}
-	defer f.Close()
 
 	sheetName := xi.sheet
 	if sheetName == "" {

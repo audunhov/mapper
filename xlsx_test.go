@@ -70,3 +70,59 @@ func TestXLSXImportAndConvert(t *testing.T) {
 		t.Errorf("unexpected Bob: %+v", users[1])
 	}
 }
+
+func TestXLSXSheets(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+
+	// Sheet1 is created by default. Let's create two more sheets.
+	f.NewSheet("Metadata")
+	f.NewSheet("Data")
+
+	// Write data to "Data" sheet
+	f.SetCellValue("Data", "A1", "Name")
+	f.SetCellValue("Data", "B1", "Age")
+	f.SetCellValue("Data", "A2", "Charlie")
+	f.SetCellValue("Data", "B2", "40")
+
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("failed to write test excel file: %v", err)
+	}
+
+	// Create importer with empty sheet name
+	importer := NewXLSXImporter(&buf, "")
+	defer importer.Close()
+
+	sheets, err := importer.GetSheets()
+	if err != nil {
+		t.Fatalf("GetSheets failed: %v", err)
+	}
+
+	// Verify we got the list of sheets
+	expectedSheets := []string{"Sheet1", "Metadata", "Data"}
+	if len(sheets) != len(expectedSheets) {
+		t.Fatalf("expected %d sheets, got %d", len(expectedSheets), len(sheets))
+	}
+	for i, s := range sheets {
+		if s != expectedSheets[i] {
+			t.Errorf("expected sheet %d to be %q, got %q", i, expectedSheets[i], s)
+		}
+	}
+
+	// Switch to "Data" sheet
+	importer.SetSheet("Data")
+
+	imported, err := importer.Import()
+	if err != nil {
+		t.Fatalf("failed to import: %v", err)
+	}
+
+	if len(imported.Rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(imported.Rows))
+	}
+
+	if imported.Rows[0]["Name"] != "Charlie" || imported.Rows[0]["Age"] != "40" {
+		t.Errorf("unexpected imported row: %v", imported.Rows[0])
+	}
+}
