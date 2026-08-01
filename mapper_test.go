@@ -402,9 +402,9 @@ type EmbeddedDetails struct {
 }
 
 type EmbeddedUser struct {
-	EmbeddedBase              // Value-type anonymous struct
-	*EmbeddedDetails          // Pointer-type anonymous struct
-	Name             string   `map:"name"`
+	EmbeddedBase            // Value-type anonymous struct
+	*EmbeddedDetails        // Pointer-type anonymous struct
+	Name             string `map:"name"`
 }
 
 func TestEmbeddedStructs(t *testing.T) {

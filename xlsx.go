@@ -142,4 +142,3 @@ func (xi *XLSXImporter) ReadHeaders() ([]string, error) {
 	}
 	return xi.imported.Headers, nil
 }
-

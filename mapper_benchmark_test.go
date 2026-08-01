@@ -73,22 +73,24 @@ func BenchmarkCSVImport_20k(b *testing.B) {
 func BenchmarkXLSXImport_20k(b *testing.B) {
 	// Create an in-memory XLSX file with 20k rows
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 	sheetName := "Sheet1"
 	headers := []string{"id", "name", "age", "active", "score", "created_at"}
 	for col, h := range headers {
 		cell, _ := excelize.CoordinatesToCellName(col+1, 1)
-		f.SetCellValue(sheetName, cell, h)
+		_ = f.SetCellValue(sheetName, cell, h)
 	}
 
 	for i := 0; i < 20000; i++ {
 		row := i + 2
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "usr-"+strconv.Itoa(i))
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), "User "+strconv.Itoa(i))
-		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), strconv.Itoa(20+(i%50)))
-		f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), strconv.FormatBool(i%2 == 0))
-		f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), strconv.FormatFloat(80.5+float64(i%20)/2.0, 'f', 2, 64))
-		f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), "2026-08-01T19:32:00Z")
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "usr-"+strconv.Itoa(i))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), "User "+strconv.Itoa(i))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), strconv.Itoa(20+(i%50)))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), strconv.FormatBool(i%2 == 0))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), strconv.FormatFloat(80.5+float64(i%20)/2.0, 'f', 2, 64))
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), "2026-08-01T19:32:00Z")
 	}
 
 	var buf bytes.Buffer

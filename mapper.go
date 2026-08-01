@@ -155,8 +155,7 @@ func Convert[T any](imported *Imported, mapping ImportMap, opts ...ConvertOption
 			return nil, wrappedErr
 		}
 
-		var val any
-		val = newElem.Addr().Interface()
+		val := newElem.Addr().Interface()
 
 		var typedVal T
 		if isPtr {

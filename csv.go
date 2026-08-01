@@ -114,4 +114,3 @@ func (ci *CSVImporter) ReadHeaders() ([]string, error) {
 	}
 	return ci.imported.Headers, nil
 }
-
