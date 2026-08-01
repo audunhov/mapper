@@ -457,3 +457,38 @@ usr-456,Bob,Editor`
 		t.Errorf("expected Role Editor, got %s", bob.Role)
 	}
 }
+
+func TestCSVOptions(t *testing.T) {
+	// Semicolon delimited file with comment lines
+	csvData := `# This is a comment line
+name;age
+# Another comment
+Alice;30
+Bob;25`
+
+	importer := NewCSVImporter(
+		strings.NewReader(csvData),
+		WithComma(';'),
+		WithComment('#'),
+	)
+	imported, err := importer.Import()
+	if err != nil {
+		t.Fatalf("failed to import CSV with options: %v", err)
+	}
+
+	if len(imported.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(imported.Rows))
+	}
+
+	users, err := Convert[TestUser](imported, nil)
+	if err != nil {
+		t.Fatalf("failed to convert: %v", err)
+	}
+
+	if users[0].Name != "Alice" || users[0].Age != 30 {
+		t.Errorf("unexpected Alice: %+v", users[0])
+	}
+	if users[1].Name != "Bob" || users[1].Age != 25 {
+		t.Errorf("unexpected Bob: %+v", users[1])
+	}
+}
