@@ -72,6 +72,8 @@ func (ci *CSVImporter) parse() error {
 		return err
 	}
 
+	reader.ReuseRecord = true
+
 	var rows []map[string]string
 	for {
 		line, err := reader.Read()
@@ -83,7 +85,7 @@ func (ci *CSVImporter) parse() error {
 			return err
 		}
 
-		rowmap := make(map[string]string)
+		rowmap := make(map[string]string, len(headers))
 		for i, val := range line {
 			if i < len(headers) {
 				rowmap[headers[i]] = val

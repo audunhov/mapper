@@ -84,23 +84,36 @@ func (xi *XLSXImporter) parse() error {
 		sheetName = sheets[0]
 	}
 
-	rows, err := f.GetRows(sheetName)
+	rowsIter, err := f.Rows(sheetName)
 	if err != nil {
 		xi.err = fmt.Errorf("failed to get rows for sheet %q: %w", sheetName, err)
 		return xi.err
 	}
+	defer rowsIter.Close()
 
-	if len(rows) == 0 {
+	var headers []string
+	if rowsIter.Next() {
+		headers, err = rowsIter.Columns()
+		if err != nil {
+			xi.err = fmt.Errorf("failed to read headers for sheet %q: %w", sheetName, err)
+			return xi.err
+		}
+	}
+
+	if len(headers) == 0 {
 		xi.imported = &Imported{}
 		return nil
 	}
 
-	headers := rows[0]
 	var importedRows []map[string]string
 
-	for i := 1; i < len(rows); i++ {
-		row := rows[i]
-		rowmap := make(map[string]string)
+	for rowsIter.Next() {
+		row, err := rowsIter.Columns()
+		if err != nil {
+			xi.err = fmt.Errorf("failed to read row for sheet %q: %w", sheetName, err)
+			return xi.err
+		}
+		rowmap := make(map[string]string, len(headers))
 		for j, val := range row {
 			if j < len(headers) {
 				rowmap[headers[j]] = val

@@ -39,12 +39,71 @@ func WithSkipOnError() ConvertOption {
 	}
 }
 
+type compiledField struct {
+	srcKey               string
+	destField            string
+	index                []int
+	kind                 reflect.Kind
+	isTime               bool
+	timeLayout           string
+	ptrDepth             int
+	isTextUnmarshaler    bool
+	isTextUnmarshalerPtr bool
+}
+
+var textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+
+func compileFields(structType reflect.Type, mapping ImportMap, configs map[string]fieldConfig) ([]compiledField, error) {
+	compiled := make([]compiledField, 0, len(mapping))
+
+	for srcKey, destField := range mapping {
+		sf, ok := structType.FieldByName(destField)
+		if !ok {
+			return nil, fmt.Errorf("field %s does not exist on target struct", destField)
+		}
+
+		fieldType := sf.Type
+		ptrDepth := 0
+		underlyingType := fieldType
+		for underlyingType.Kind() == reflect.Pointer {
+			ptrDepth++
+			underlyingType = underlyingType.Elem()
+		}
+
+		isTime := underlyingType == reflect.TypeOf(time.Time{})
+		var timeLayout string
+		if isTime {
+			timeLayout = time.RFC3339
+			if cfg, exists := configs[destField]; exists && cfg.layout != "" {
+				timeLayout = cfg.layout
+			}
+		}
+
+		isTextUnmarshaler := underlyingType.Implements(textUnmarshalerType)
+		isTextUnmarshalerPtr := reflect.PointerTo(underlyingType).Implements(textUnmarshalerType)
+
+		compiled = append(compiled, compiledField{
+			srcKey:               srcKey,
+			destField:            destField,
+			index:                sf.Index,
+			kind:                 underlyingType.Kind(),
+			isTime:               isTime,
+			timeLayout:           timeLayout,
+			ptrDepth:             ptrDepth,
+			isTextUnmarshaler:    isTextUnmarshaler,
+			isTextUnmarshalerPtr: isTextUnmarshalerPtr,
+		})
+	}
+
+	return compiled, nil
+}
+
 // Convert maps rows in Imported into a slice of type T (struct or pointer to struct)
 // using the provided runtime ImportMap. If mapping is nil or empty, fields are mapped
 // automatically using struct tags (`map`) and matching field names.
 // It accepts optional ConvertOption parameters to customize error handling.
 func Convert[T any](imported *Imported, mapping ImportMap, opts ...ConvertOption) ([]T, error) {
-	var result []T
+	result := make([]T, 0, len(imported.Rows))
 
 	var dummy T
 	t := reflect.TypeOf(dummy)
@@ -72,6 +131,11 @@ func Convert[T any](imported *Imported, mapping ImportMap, opts ...ConvertOption
 	resolvedMapping := resolveMapping(sourceKeys, structType, mapping)
 	fieldConfigs := getFieldConfigs(structType)
 
+	compiled, err := compileFields(structType, resolvedMapping, fieldConfigs)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &convertConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -79,7 +143,7 @@ func Convert[T any](imported *Imported, mapping ImportMap, opts ...ConvertOption
 
 	for i, row := range imported.Rows {
 		newElem := reflect.New(structType).Elem()
-		if err := mapRowToStruct(row, newElem, resolvedMapping, fieldConfigs); err != nil {
+		if err := mapRowToStructFast(row, newElem, compiled); err != nil {
 			// CSV line numbers are generally: header line (1) + data row index (1-based) + 1 = i + 2
 			wrappedErr := fmt.Errorf("row %d (line %d): %w", i+1, i+2, err)
 			if cfg.errorHandler != nil {
@@ -92,15 +156,21 @@ func Convert[T any](imported *Imported, mapping ImportMap, opts ...ConvertOption
 		}
 
 		var val any
-		if isPtr {
-			val = newElem.Addr().Interface()
-		} else {
-			val = newElem.Interface()
-		}
+		val = newElem.Addr().Interface()
 
-		typedVal, ok := val.(T)
-		if !ok {
-			return nil, fmt.Errorf("failed to assert value of type %T to target type %T", val, dummy)
+		var typedVal T
+		if isPtr {
+			var ok bool
+			typedVal, ok = val.(T)
+			if !ok {
+				return nil, fmt.Errorf("failed to assert value of type %T to target type %T", val, dummy)
+			}
+		} else {
+			typedValPtr, ok := val.(*T)
+			if !ok {
+				return nil, fmt.Errorf("failed to assert value of type %T to target type *%T", val, dummy)
+			}
+			typedVal = *typedValPtr
 		}
 		result = append(result, typedVal)
 	}
@@ -248,51 +318,31 @@ func resolveMapping(sourceKeys []string, structType reflect.Type, mapping Import
 	return resolved
 }
 
-func initializeEmbedded(val reflect.Value) {
-	t := val.Type()
-	if t.Kind() != reflect.Struct {
-		return
-	}
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if field.Anonymous {
-			fieldVal := val.Field(i)
-			if fieldVal.Kind() == reflect.Pointer {
-				if fieldVal.IsNil() {
-					fieldVal.Set(reflect.New(fieldVal.Type().Elem()))
-				}
-				initializeEmbedded(fieldVal.Elem())
-			} else {
-				initializeEmbedded(fieldVal)
-			}
-		}
-	}
-}
-
-func mapRowToStruct(row map[string]string, val reflect.Value, mapping ImportMap, configs map[string]fieldConfig) error {
-	initializeEmbedded(val)
-	for srcKey, destField := range mapping {
-		field := val.FieldByName(destField)
-		if !field.IsValid() {
-			return fmt.Errorf("field %s does not exist on target struct", destField)
-		}
-		if !field.CanSet() {
-			return fmt.Errorf("field %s cannot be set", destField)
-		}
-
-		rowVal, ok := row[srcKey]
+func mapRowToStructFast(row map[string]string, val reflect.Value, fields []compiledField) error {
+	for _, cf := range fields {
+		rowVal, ok := row[cf.srcKey]
 		if !ok {
 			continue
 		}
 
-		// Handle pointer fields
-		targetField := field
-		if field.Kind() == reflect.Pointer {
+		// Navigate to the target field using cf.index path
+		targetField := val
+		for _, idx := range cf.index {
+			if targetField.Kind() == reflect.Pointer {
+				if targetField.IsNil() {
+					targetField.Set(reflect.New(targetField.Type().Elem()))
+				}
+				targetField = targetField.Elem()
+			}
+			targetField = targetField.Field(idx)
+		}
+
+		if cf.ptrDepth > 0 {
 			if rowVal == "" {
 				continue
 			}
 			// Resolve pointer chain
-			for targetField.Kind() == reflect.Pointer {
+			for i := 0; i < cf.ptrDepth; i++ {
 				if targetField.IsNil() {
 					targetField.Set(reflect.New(targetField.Type().Elem()))
 				}
@@ -301,73 +351,70 @@ func mapRowToStruct(row map[string]string, val reflect.Value, mapping ImportMap,
 		}
 
 		// Check for time.Time
-		if targetField.Type() == reflect.TypeOf(time.Time{}) {
-			layout := time.RFC3339
-			if cfg, exists := configs[destField]; exists && cfg.layout != "" {
-				layout = cfg.layout
-			}
-			tVal, err := time.Parse(layout, rowVal)
+		if cf.isTime {
+			tVal, err := time.Parse(cf.timeLayout, rowVal)
 			if err != nil {
 				// If parsing with RFC3339 failed and layout was default, try "2006-01-02" fallback
-				if layout == time.RFC3339 {
+				if cf.timeLayout == time.RFC3339 {
 					if tVal, errFallback := time.Parse("2006-01-02", rowVal); errFallback == nil {
 						targetField.Set(reflect.ValueOf(tVal))
 						continue
 					}
 				}
-				return fmt.Errorf("cannot parse %q as time for field %s using layout %q: %w", rowVal, destField, layout, err)
+				return fmt.Errorf("cannot parse %q as time for field %s using layout %q: %w", rowVal, cf.destField, cf.timeLayout, err)
 			}
 			targetField.Set(reflect.ValueOf(tVal))
 			continue
 		}
 
 		// Support TextUnmarshaler, so other custom types can override default behavior
-		if targetField.CanAddr() {
+		if cf.isTextUnmarshalerPtr && targetField.CanAddr() {
 			if unmarshaler, ok := targetField.Addr().Interface().(encoding.TextUnmarshaler); ok {
 				if err := unmarshaler.UnmarshalText([]byte(rowVal)); err != nil {
-					return fmt.Errorf("cannot unmarshal %q into field %s: %w", rowVal, destField, err)
+					return fmt.Errorf("cannot unmarshal %q into field %s: %w", rowVal, cf.destField, err)
 				}
 				continue
 			}
 		}
-		if unmarshaler, ok := targetField.Interface().(encoding.TextUnmarshaler); ok {
-			if err := unmarshaler.UnmarshalText([]byte(rowVal)); err != nil {
-				return fmt.Errorf("cannot unmarshal %q into field %s: %w", rowVal, destField, err)
+		if cf.isTextUnmarshaler {
+			if unmarshaler, ok := targetField.Interface().(encoding.TextUnmarshaler); ok {
+				if err := unmarshaler.UnmarshalText([]byte(rowVal)); err != nil {
+					return fmt.Errorf("cannot unmarshal %q into field %s: %w", rowVal, cf.destField, err)
+				}
+				continue
 			}
-			continue
 		}
 
-		switch targetField.Kind() {
+		switch cf.kind {
 		case reflect.String:
 			targetField.SetString(rowVal)
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			intVal, err := strconv.ParseInt(rowVal, 10, 64)
 			if err != nil {
-				return fmt.Errorf("cannot parse %q as int for field %s: %w", rowVal, destField, err)
+				return fmt.Errorf("cannot parse %q as int for field %s: %w", rowVal, cf.destField, err)
 			}
 			targetField.SetInt(intVal)
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			uintVal, err := strconv.ParseUint(rowVal, 10, 64)
 			if err != nil {
-				return fmt.Errorf("cannot parse %q as uint for field %s: %w", rowVal, destField, err)
+				return fmt.Errorf("cannot parse %q as uint for field %s: %w", rowVal, cf.destField, err)
 			}
 			targetField.SetUint(uintVal)
 		case reflect.Float32, reflect.Float64:
 			floatVal, err := strconv.ParseFloat(rowVal, 64)
 			if err != nil {
-				return fmt.Errorf("cannot parse %q as float for field %s: %w", rowVal, destField, err)
+				return fmt.Errorf("cannot parse %q as float for field %s: %w", rowVal, cf.destField, err)
 			}
 			targetField.SetFloat(floatVal)
 		case reflect.Bool:
 			boolVal, err := strconv.ParseBool(rowVal)
 			if err != nil {
-				return fmt.Errorf("cannot parse %q as bool for field %s: %w", rowVal, destField, err)
+				return fmt.Errorf("cannot parse %q as bool for field %s: %w", rowVal, cf.destField, err)
 			}
 			targetField.SetBool(boolVal)
 		default:
-			return fmt.Errorf("unsupported field type %s for field %s", targetField.Kind(), destField)
+			return fmt.Errorf("unsupported field type %s for field %s", cf.kind, cf.destField)
 		}
 	}
 	return nil
 }
-
