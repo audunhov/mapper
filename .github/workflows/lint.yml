@@ -1,27 +1,19 @@
-name: golangci-lint
-
+name: Lint
 on:
   push:
-    branches: [ main, master ]
+    branches: [main]
   pull_request:
-    branches: [ main, master ]
-
-permissions:
-  contents: read
 
 jobs:
-  golangci-lint:
+  golangci:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
-          cache: true
-
-      - name: Run golangci-lint
-        run: go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8 run ./...
+          go-version: '1.25'
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2
