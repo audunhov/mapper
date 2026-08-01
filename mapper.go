@@ -234,8 +234,23 @@ func mapRowToStruct(row map[string]string, val reflect.Value, mapping ImportMap,
 			continue
 		}
 
+		// Handle pointer fields
+		targetField := field
+		if field.Kind() == reflect.Ptr {
+			if rowVal == "" {
+				continue
+			}
+			// Resolve pointer chain
+			for targetField.Kind() == reflect.Ptr {
+				if targetField.IsNil() {
+					targetField.Set(reflect.New(targetField.Type().Elem()))
+				}
+				targetField = targetField.Elem()
+			}
+		}
+
 		// Check for time.Time
-		if field.Type() == reflect.TypeOf(time.Time{}) {
+		if targetField.Type() == reflect.TypeOf(time.Time{}) {
 			layout := time.RFC3339
 			if cfg, exists := configs[destField]; exists && cfg.layout != "" {
 				layout = cfg.layout
@@ -245,61 +260,61 @@ func mapRowToStruct(row map[string]string, val reflect.Value, mapping ImportMap,
 				// If parsing with RFC3339 failed and layout was default, try "2006-01-02" fallback
 				if layout == time.RFC3339 {
 					if tVal, errFallback := time.Parse("2006-01-02", rowVal); errFallback == nil {
-						field.Set(reflect.ValueOf(tVal))
+						targetField.Set(reflect.ValueOf(tVal))
 						continue
 					}
 				}
 				return fmt.Errorf("cannot parse %q as time for field %s using layout %q: %w", rowVal, destField, layout, err)
 			}
-			field.Set(reflect.ValueOf(tVal))
+			targetField.Set(reflect.ValueOf(tVal))
 			continue
 		}
 
 		// Support TextUnmarshaler, so other custom types can override default behavior
-		if field.CanAddr() {
-			if unmarshaler, ok := field.Addr().Interface().(encoding.TextUnmarshaler); ok {
+		if targetField.CanAddr() {
+			if unmarshaler, ok := targetField.Addr().Interface().(encoding.TextUnmarshaler); ok {
 				if err := unmarshaler.UnmarshalText([]byte(rowVal)); err != nil {
 					return fmt.Errorf("cannot unmarshal %q into field %s: %w", rowVal, destField, err)
 				}
 				continue
 			}
 		}
-		if unmarshaler, ok := field.Interface().(encoding.TextUnmarshaler); ok {
+		if unmarshaler, ok := targetField.Interface().(encoding.TextUnmarshaler); ok {
 			if err := unmarshaler.UnmarshalText([]byte(rowVal)); err != nil {
 				return fmt.Errorf("cannot unmarshal %q into field %s: %w", rowVal, destField, err)
 			}
 			continue
 		}
 
-		switch field.Kind() {
+		switch targetField.Kind() {
 		case reflect.String:
-			field.SetString(rowVal)
+			targetField.SetString(rowVal)
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			intVal, err := strconv.ParseInt(rowVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("cannot parse %q as int for field %s: %w", rowVal, destField, err)
 			}
-			field.SetInt(intVal)
+			targetField.SetInt(intVal)
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			uintVal, err := strconv.ParseUint(rowVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("cannot parse %q as uint for field %s: %w", rowVal, destField, err)
 			}
-			field.SetUint(uintVal)
+			targetField.SetUint(uintVal)
 		case reflect.Float32, reflect.Float64:
 			floatVal, err := strconv.ParseFloat(rowVal, 64)
 			if err != nil {
 				return fmt.Errorf("cannot parse %q as float for field %s: %w", rowVal, destField, err)
 			}
-			field.SetFloat(floatVal)
+			targetField.SetFloat(floatVal)
 		case reflect.Bool:
 			boolVal, err := strconv.ParseBool(rowVal)
 			if err != nil {
 				return fmt.Errorf("cannot parse %q as bool for field %s: %w", rowVal, destField, err)
 			}
-			field.SetBool(boolVal)
+			targetField.SetBool(boolVal)
 		default:
-			return fmt.Errorf("unsupported field type %s for field %s", field.Kind(), destField)
+			return fmt.Errorf("unsupported field type %s for field %s", targetField.Kind(), destField)
 		}
 	}
 	return nil

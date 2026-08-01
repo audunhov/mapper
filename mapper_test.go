@@ -327,3 +327,68 @@ Bob,Jones,25,INACTIVE,2026-08-01,2001-10-20`
 		t.Errorf("expected error to be %v, got %v", customErr, err)
 	}
 }
+
+type PointerUser struct {
+	Name    *string       `map:"name"`
+	Age     *int          `map:"age"`
+	Active  *bool         `map:"active"`
+	Percent *float64      `map:"percent"`
+	Status  *CustomStatus `map:"status"`
+}
+
+func TestPointerFields(t *testing.T) {
+	csvData := `name,age,active,percent,status
+Alice,30,true,98.6,ACTIVE
+Bob,,,,`
+
+	importer := NewCSVImporter(strings.NewReader(csvData))
+	imported, err := importer.Import()
+	if err != nil {
+		t.Fatalf("failed to import CSV: %v", err)
+	}
+
+	users, err := Convert[PointerUser](imported, nil)
+	if err != nil {
+		t.Fatalf("failed to convert: %v", err)
+	}
+
+	if len(users) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(users))
+	}
+
+	// Verify Alice has all fields populated
+	alice := users[0]
+	if alice.Name == nil || *alice.Name != "Alice" {
+		t.Errorf("expected Name 'Alice', got %v", alice.Name)
+	}
+	if alice.Age == nil || *alice.Age != 30 {
+		t.Errorf("expected Age 30, got %v", alice.Age)
+	}
+	if alice.Active == nil || *alice.Active != true {
+		t.Errorf("expected Active true, got %v", alice.Active)
+	}
+	if alice.Percent == nil || *alice.Percent != 98.6 {
+		t.Errorf("expected Percent 98.6, got %v", alice.Percent)
+	}
+	if alice.Status == nil || *alice.Status != "ACTIVE" {
+		t.Errorf("expected Status 'ACTIVE', got %v", alice.Status)
+	}
+
+	// Verify Bob has nil fields because of empty strings
+	bob := users[1]
+	if bob.Name == nil || *bob.Name != "Bob" {
+		t.Errorf("expected Name 'Bob' even if others are empty, got %v", bob.Name)
+	}
+	if bob.Age != nil {
+		t.Errorf("expected Age to be nil, got %v", *bob.Age)
+	}
+	if bob.Active != nil {
+		t.Errorf("expected Active to be nil, got %v", *bob.Active)
+	}
+	if bob.Percent != nil {
+		t.Errorf("expected Percent to be nil, got %v", *bob.Percent)
+	}
+	if bob.Status != nil {
+		t.Errorf("expected Status to be nil, got %v", *bob.Status)
+	}
+}
