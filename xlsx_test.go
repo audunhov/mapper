@@ -10,26 +10,28 @@ import (
 func TestXLSXImportAndConvert(t *testing.T) {
 	// Create an in-memory XLSX file
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	sheetName := "Sheet1"
 	// Write headers
-	f.SetCellValue(sheetName, "A1", "Name")
-	f.SetCellValue(sheetName, "B1", "Age")
-	f.SetCellValue(sheetName, "C1", "Active")
-	f.SetCellValue(sheetName, "D1", "Percent")
+	_ = f.SetCellValue(sheetName, "A1", "Name")
+	_ = f.SetCellValue(sheetName, "B1", "Age")
+	_ = f.SetCellValue(sheetName, "C1", "Active")
+	_ = f.SetCellValue(sheetName, "D1", "Percent")
 
 	// Row 1
-	f.SetCellValue(sheetName, "A2", "Alice")
-	f.SetCellValue(sheetName, "B2", "30")
-	f.SetCellValue(sheetName, "C2", "true")
-	f.SetCellValue(sheetName, "D2", "98.6")
+	_ = f.SetCellValue(sheetName, "A2", "Alice")
+	_ = f.SetCellValue(sheetName, "B2", "30")
+	_ = f.SetCellValue(sheetName, "C2", "true")
+	_ = f.SetCellValue(sheetName, "D2", "98.6")
 
 	// Row 2
-	f.SetCellValue(sheetName, "A3", "Bob")
-	f.SetCellValue(sheetName, "B3", "25")
-	f.SetCellValue(sheetName, "C3", "false")
-	f.SetCellValue(sheetName, "D3", "72.3")
+	_ = f.SetCellValue(sheetName, "A3", "Bob")
+	_ = f.SetCellValue(sheetName, "B3", "25")
+	_ = f.SetCellValue(sheetName, "C3", "false")
+	_ = f.SetCellValue(sheetName, "D3", "72.3")
 
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
@@ -73,17 +75,19 @@ func TestXLSXImportAndConvert(t *testing.T) {
 
 func TestXLSXSheets(t *testing.T) {
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	// Sheet1 is created by default. Let's create two more sheets.
-	f.NewSheet("Metadata")
-	f.NewSheet("Data")
+	_, _ = f.NewSheet("Metadata")
+	_, _ = f.NewSheet("Data")
 
 	// Write data to "Data" sheet
-	f.SetCellValue("Data", "A1", "Name")
-	f.SetCellValue("Data", "B1", "Age")
-	f.SetCellValue("Data", "A2", "Charlie")
-	f.SetCellValue("Data", "B2", "40")
+	_ = f.SetCellValue("Data", "A1", "Name")
+	_ = f.SetCellValue("Data", "B1", "Age")
+	_ = f.SetCellValue("Data", "A2", "Charlie")
+	_ = f.SetCellValue("Data", "B2", "40")
 
 	var buf bytes.Buffer
 	if err := f.Write(&buf); err != nil {
@@ -92,7 +96,9 @@ func TestXLSXSheets(t *testing.T) {
 
 	// Create importer with empty sheet name
 	importer := NewXLSXImporter(&buf, "")
-	defer importer.Close()
+	defer func() {
+		_ = importer.Close()
+	}()
 
 	sheets, err := importer.GetSheets()
 	if err != nil {

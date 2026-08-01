@@ -50,7 +50,7 @@ func Convert[T any](imported *Imported, mapping ImportMap, opts ...ConvertOption
 	t := reflect.TypeOf(dummy)
 
 	// Determine underlying struct type
-	isPtr := t.Kind() == reflect.Ptr
+	isPtr := t.Kind() == reflect.Pointer
 	structType := t
 	if isPtr {
 		structType = t.Elem()
@@ -123,7 +123,7 @@ func getFieldConfigs(structType reflect.Type) map[string]fieldConfig {
 			}
 			if field.Anonymous {
 				fieldType := field.Type
-				if fieldType.Kind() == reflect.Ptr {
+				if fieldType.Kind() == reflect.Pointer {
 					fieldType = fieldType.Elem()
 				}
 				if fieldType.Kind() == reflect.Struct {
@@ -186,7 +186,7 @@ func resolveMapping(sourceKeys []string, structType reflect.Type, mapping Import
 
 			if field.Anonymous {
 				fieldType := field.Type
-				if fieldType.Kind() == reflect.Ptr {
+				if fieldType.Kind() == reflect.Pointer {
 					fieldType = fieldType.Elem()
 				}
 				if fieldType.Kind() == reflect.Struct {
@@ -257,7 +257,7 @@ func initializeEmbedded(val reflect.Value) {
 		field := t.Field(i)
 		if field.Anonymous {
 			fieldVal := val.Field(i)
-			if fieldVal.Kind() == reflect.Ptr {
+			if fieldVal.Kind() == reflect.Pointer {
 				if fieldVal.IsNil() {
 					fieldVal.Set(reflect.New(fieldVal.Type().Elem()))
 				}
@@ -287,12 +287,12 @@ func mapRowToStruct(row map[string]string, val reflect.Value, mapping ImportMap,
 
 		// Handle pointer fields
 		targetField := field
-		if field.Kind() == reflect.Ptr {
+		if field.Kind() == reflect.Pointer {
 			if rowVal == "" {
 				continue
 			}
 			// Resolve pointer chain
-			for targetField.Kind() == reflect.Ptr {
+			for targetField.Kind() == reflect.Pointer {
 				if targetField.IsNil() {
 					targetField.Set(reflect.New(targetField.Type().Elem()))
 				}
